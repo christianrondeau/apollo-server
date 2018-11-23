@@ -47,6 +47,8 @@ export abstract class RESTDataSource<TContext = any> extends DataSource {
   httpCache!: HTTPCache;
   context!: TContext;
   memoizedResults = new Map<string, Promise<any>>();
+  traceEnabled =
+    process && process.env && process.env.NODE_ENV === 'development';
 
   initialize(config: DataSourceConfig<TContext>): void {
     this.context = config.context;
@@ -191,6 +193,17 @@ export abstract class RESTDataSource<TContext = any> extends DataSource {
     );
   }
 
+  protected log(
+    method: string,
+    url: string,
+    duration: number,
+    success: boolean,
+  ): void {
+    console.log(
+      `${method} ${url} (${duration}ms)${success ? '' : ' [failed]'}`,
+    );
+  }
+
   private async fetch<TResult>(
     init: RequestInit & {
       path: string;
@@ -235,7 +248,7 @@ export abstract class RESTDataSource<TContext = any> extends DataSource {
     const cacheKey = this.cacheKeyFor(request);
 
     const performRequest = async () => {
-      return this.trace(`${options.method || 'GET'} ${url}`, async () => {
+      return this.trace(options.method || 'GET', url, async () => {
         const cacheOptions = options.cacheOptions
           ? options.cacheOptions
           : this.cacheOptionsFor && this.cacheOptionsFor.bind(this);
@@ -265,17 +278,22 @@ export abstract class RESTDataSource<TContext = any> extends DataSource {
   }
 
   private async trace<TResult>(
-    label: string,
+    method: string,
+    url: string,
     fn: () => Promise<TResult>,
   ): Promise<TResult> {
-    if (process && process.env && process.env.NODE_ENV === 'development') {
+    if (this.traceEnabled) {
       // We're not using console.time because that isn't supported on Cloudflare
       const startTime = Date.now();
+      let success = true;
       try {
         return await fn();
+      } catch (error) {
+        success = false;
+        throw error;
       } finally {
         const duration = Date.now() - startTime;
-        console.log(`${label} (${duration}ms)`);
+        this.log(method, url, duration, success);
       }
     } else {
       return fn();
